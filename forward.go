@@ -1,0 +1,341 @@
+package main
+
+import (
+	"bytes"
+	"encoding/binary"
+	"fmt"
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/pcap"
+	"log"
+	"net"
+	"time"
+)
+
+var ipmap map[string]bool = map[string]bool{}
+
+func initForward() {
+	wan.que = make(chan gopacket.Packet, 10000)
+	lan.que = make(chan gopacket.Packet, 10000)
+}
+
+func forward() {
+	initForward()
+	go recvLan()
+	go recvWan()
+	go sendLan()
+	go sendWan()
+}
+
+func recvLan() {
+	inactive, err := pcap.NewInactiveHandle(lan.name)
+	if err != nil {
+		fmt.Println("lan-recv: fail to open nic, ", err)
+		return
+	}
+	defer inactive.CleanUp()
+
+	err = inactive.SetImmediateMode(true)
+	if err != nil {
+		fmt.Println("lan-recv: fail to set mode, ", err)
+		return
+	}
+
+	if err = inactive.SetTimeout(time.Minute); err != nil {
+		if err != nil {
+			fmt.Println("lan-recv: fail to set timeout, ", err)
+			return
+		}
+	}
+	//if err = inactive.SetTimestampSource("foo"); err != nil {
+	//	log.Fatal(err)
+	//}
+
+	// Finally, create the actual handle by calling Activate:
+	handle, err := inactive.Activate() // after this, inactive is no longer valid
+	if err != nil {
+		fmt.Println("lan-recv: fail to active nic, ", err)
+		return
+	}
+	defer handle.Close()
+
+	handle.SetDirection(pcap.DirectionIn)
+	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
+	for packet := range packetSource.Packets() {
+		if len(packet.Data()) < 34 { //mac header + ip header
+			continue
+		}
+		if bytes.Equal(packet.Data()[0:6], lan.mac) == false { //promiscuous mode,dst mac != self mac
+			continue
+		}
+
+		if bytes.Equal(packet.Data()[12:14], []byte{0x08, 0x00}) == false { //skip !ipv4
+			continue
+		}
+
+		if bytes.Equal(packet.Data()[30:34], lan.ip) == true { // skip dst ip == self ip
+			continue
+		}
+		if lan.rflag == false {
+			lan.rip = make(net.IP, 4)
+			copy(lan.rip, packet.Data()[26:30])
+			lan.rmac = make(net.HardwareAddr, 6)
+			copy(lan.rmac, packet.Data()[6:12])
+			lan.rflag = true
+		}
+		_, ok := ipmap[string(packet.Data()[30:34])]
+		if !ok {
+			fmt.Println("lan-recv: ", packet.Data()[30:34])
+			ipmap[string(packet.Data()[30:34])] = true
+		}
+		wan.que <- packet
+	}
+}
+
+func sendLan() {
+	inactive, err := pcap.NewInactiveHandle(lan.name)
+	if err != nil {
+		log.Fatal(err)
+		return
+	}
+	defer inactive.CleanUp()
+
+	err = inactive.SetImmediateMode(true)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	// Call various functions on inactive to set it up the way you'd like:
+	if err = inactive.SetTimeout(time.Minute); err != nil {
+		log.Fatal(err)
+	}
+	//if err = inactive.SetTimestampSource("foo"); err != nil {
+	//	log.Fatal(err)
+	//}
+
+	// Finally, create the actual handle by calling Activate:
+	handle, err := inactive.Activate() // after this, inactive is no longer valid
+	if err != nil {
+		log.Fatal(err)
+		return
+	}
+	defer handle.Close()
+	for {
+		select {
+		case pkt := <-lan.que:
+			{
+				//replace dst mac
+				copy(pkt.Data()[0:6], lan.rmac)
+				//replace src mac
+				copy(pkt.Data()[6:12], lan.mac)
+
+				//replace dst ip
+				copy(pkt.Data()[30:34], lan.rip)
+
+				//calculate ip checksum
+				copy(pkt.Data()[24:26], []byte{0, 0})
+				checksum := checksum(pkt.Data()[14:34])
+				copy(pkt.Data()[24:26], []byte{byte(checksum >> 8), byte(checksum & 0xff)}) //set ip checksum
+
+				//update tcp checksum
+				if bytes.Equal(pkt.Data()[23:24], []byte{0x06}) == true { //tcp
+					checksum = tcpchecksum(pkt.Data()[34:], pkt.Data()[26:30], pkt.Data()[30:34])
+					copy(pkt.Data()[50:52], []byte{byte(checksum >> 8), byte(checksum & 0xff)}) //set tcp checksum
+				} else if bytes.Equal(pkt.Data()[23:24], []byte{0x11}) == true { //udp
+
+				}
+				err = handle.WritePacketData(pkt.Data())
+				if err != nil {
+					fmt.Println("lan-send: fail to send data, ", err)
+				}
+			}
+		}
+	}
+}
+
+func recvWan() {
+	inactive, err := pcap.NewInactiveHandle(wan.name)
+	if err != nil {
+		fmt.Println("wan-recv: fail to open nic, ", err)
+		return
+	}
+	defer inactive.CleanUp()
+
+	err = inactive.SetImmediateMode(true)
+	if err != nil {
+		fmt.Println("wan-recv: fail to set mode, ", err)
+		return
+	}
+
+	if err = inactive.SetTimeout(time.Minute); err != nil {
+		if err != nil {
+			fmt.Println("wan-recv: fail to set timeout, ", err)
+			return
+		}
+	}
+	//if err = inactive.SetTimestampSource("foo"); err != nil {
+	//	log.Fatal(err)
+	//}
+
+	// Finally, create the actual handle by calling Activate:
+	handle, err := inactive.Activate() // after this, inactive is no longer valid
+	if err != nil {
+		fmt.Println("wan-recv: fail to active nic, ", err)
+		return
+	}
+	defer handle.Close()
+
+	handle.SetDirection(pcap.DirectionIn)
+	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
+	for packet := range packetSource.Packets() {
+		if len(packet.Data()) < 34 { //mac header + ip header
+			continue
+		}
+		if bytes.Equal(packet.Data()[0:6], wan.mac) == false { //promiscuous mode,dst mac != self mac
+			continue
+		}
+
+		if bytes.Equal(packet.Data()[12:14], []byte{0x08, 0x00}) == false { //skip !ipv4
+			continue
+		}
+
+		if bytes.Equal(packet.Data()[30:34], wan.ip) == false { // skip dst ip != self ip
+			continue
+		}
+		_, ok := ipmap[string(packet.Data()[26:30])]
+		if ok {
+			lan.que <- packet
+		}
+	}
+}
+
+func sendWan() {
+	inactive, err := pcap.NewInactiveHandle(wan.name)
+	if err != nil {
+		log.Fatal(err)
+		return
+	}
+	defer inactive.CleanUp()
+
+	err = inactive.SetImmediateMode(true)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	// Call various functions on inactive to set it up the way you'd like:
+	if err = inactive.SetTimeout(time.Minute); err != nil {
+		log.Fatal(err)
+	}
+	//if err = inactive.SetTimestampSource("foo"); err != nil {
+	//	log.Fatal(err)
+	//}
+
+	// Finally, create the actual handle by calling Activate:
+	handle, err := inactive.Activate() // after this, inactive is no longer valid
+	if err != nil {
+		log.Fatal(err)
+		return
+	}
+	defer handle.Close()
+	for {
+		select {
+		case pkt := <-wan.que:
+			{
+				//replace dst mac
+				copy(pkt.Data()[0:6], wan.gwMac)
+				//replace src mac
+				copy(pkt.Data()[6:12], wan.mac)
+				//replace source ip
+				copy(pkt.Data()[26:30], wan.ip)
+				copy(pkt.Data()[24:26], []byte{0, 0}) //set ip checksum
+				//calculate ip checksum
+				checksum := checksum(pkt.Data()[14:34])
+				copy(pkt.Data()[24:26], []byte{byte(checksum >> 8), byte(checksum & 0xff)}) //set ip checksum
+
+				//update tcp checksum
+				if bytes.Equal(pkt.Data()[23:24], []byte{0x06}) == true { //tcp
+					checksum = tcpchecksum(pkt.Data()[34:], pkt.Data()[26:30], pkt.Data()[30:34])
+					copy(pkt.Data()[50:52], []byte{byte(checksum >> 8), byte(checksum & 0xff)}) //set tcp checksum
+				} else if bytes.Equal(pkt.Data()[23:24], []byte{0x11}) == true { //udp
+
+				}
+
+				err = handle.WritePacketData(pkt.Data())
+				if err != nil {
+					fmt.Println("wan-send: fail to send data, ", err)
+				}
+			}
+		}
+	}
+}
+
+func checksum(data []byte) uint16 {
+	var (
+		sum    uint32
+		length int = len(data)
+		index  int
+	)
+
+	// 以每两个字节（16位）为一组进行求和
+	for length > 1 {
+		sum += uint32(binary.BigEndian.Uint16(data[index : index+2]))
+		index += 2
+		length -= 2
+	}
+
+	// 如果字节数为奇数，将最后一个字节单独相加
+	if length > 0 {
+		sum += uint32(data[index])
+	}
+
+	sum += (sum >> 16)
+
+	// 取反得到校验和
+	return uint16(^sum)
+}
+
+func caltcpchecksum(data []byte) uint16 {
+	var sum uint32
+	length := len(data)
+
+	for i := 0; i < length-1; i += 2 {
+		sum += uint32(data[i])<<8 | uint32(data[i+1])
+	}
+
+	if length%2 == 1 {
+		sum += uint32(data[length-1]) << 8
+	}
+
+	for sum > 0xffff {
+		sum = (sum >> 16) + (sum & 0xffff)
+	}
+
+	return uint16(^sum)
+}
+
+type pseudoHeader struct {
+	SourceAddress      [4]byte
+	DestinationAddress [4]byte
+	Zero               uint8
+	Protocol           uint8
+	TCPLength          uint16
+}
+
+func tcpchecksum(data []byte, srcIP, dstIP net.IP) uint16 {
+
+	pHeader := pseudoHeader{}
+	copy(pHeader.SourceAddress[:], srcIP.To4())
+	copy(pHeader.DestinationAddress[:], dstIP.To4())
+	pHeader.Protocol = 6                  // TCP protocol number
+	pHeader.TCPLength = uint16(len(data)) // TCP header length
+
+	pHeaderBytes := make([]byte, 12)
+	binary.BigEndian.PutUint32(pHeaderBytes[0:], binary.BigEndian.Uint32(pHeader.SourceAddress[:]))
+	binary.BigEndian.PutUint32(pHeaderBytes[4:], binary.BigEndian.Uint32(pHeader.DestinationAddress[:]))
+	pHeaderBytes[8] = pHeader.Zero
+	pHeaderBytes[9] = pHeader.Protocol
+	binary.BigEndian.PutUint16(pHeaderBytes[10:], pHeader.TCPLength)
+	data[16] = 0
+	data[17] = 0
+	check := append(pHeaderBytes, data...)
+	return caltcpchecksum(check)
+}

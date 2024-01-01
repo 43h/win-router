@@ -1,0 +1,1 @@
+go build main.go help.go conf.go nic.go forward.go
