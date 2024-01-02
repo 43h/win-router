@@ -27,6 +27,7 @@ type Lan struct {
 	cfgName string
 	que     chan gopacket.Packet
 	handle  *pcap.Handle
+	stat    statNic
 }
 
 type Wan struct {
@@ -38,6 +39,7 @@ type Wan struct {
 	cfgName string
 	que     chan gopacket.Packet
 	handle  *pcap.Handle
+	stat    statNic
 }
 
 var lan Lan = Lan{rip: make(net.IP, 4), rmac: make(net.HardwareAddr, 6)}

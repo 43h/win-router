@@ -52,6 +52,7 @@ func recvLan() {
 		if !ok {
 			ipmap[string(packet.Data()[30:34])] = true
 		}
+		lan.stat.rx += uint32(len(packet.Data()))
 		wan.que <- packet
 	}
 }
@@ -82,8 +83,10 @@ func sendLan() {
 				} else if bytes.Equal(pkt.Data()[23:24], []byte{0x11}) == true { //udp
 
 				}
+				lan.stat.tx += uint32(len(pkt.Data()))
 				err := handle.WritePacketData(pkt.Data())
 				if err != nil {
+					lan.stat.txRrr += 1
 					log.Println("lan-send: fail to send data, ", err)
 				}
 			}
@@ -111,6 +114,7 @@ func recvWan() {
 		}
 		_, ok := ipmap[string(packet.Data()[26:30])]
 		if ok {
+			wan.stat.rx += uint32(len(packet.Data()))
 			lan.que <- packet
 		}
 	}
@@ -140,9 +144,10 @@ func sendWan() {
 				} else if bytes.Equal(pkt.Data()[23:24], []byte{0x11}) == true { //udp
 
 				}
-
+				wan.stat.tx += uint32(len(pkt.Data()))
 				err := handle.WritePacketData(pkt.Data())
 				if err != nil {
+					wan.stat.txRrr += 1
 					log.Println("wan-send: fail to send data, ", err)
 				}
 			}

@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"time"
 )
 
 const version = "0.1.1-20240102\n"
@@ -57,7 +56,5 @@ func main() {
 	defer closeNic()
 	forward()
 
-	for {
-		time.Sleep(time.Second * 10000)
-	}
+	showStat()
 }
