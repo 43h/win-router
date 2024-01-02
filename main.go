@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-const version = "0.1.0-20240101\n"
+const version = "0.1.1-20240102\n"
 
 func parseArg(arg []string) bool {
 	var argNum = len(arg)
@@ -44,10 +44,19 @@ func main() {
 
 	loadConf()
 	if checkNic() == false {
+
 		return
 	}
 
+	initLog()
+	defer closeLog()
+
+	if initNic() == false {
+		return
+	}
+	defer closeNic()
 	forward()
+
 	for {
 		time.Sleep(time.Second * 10000)
 	}

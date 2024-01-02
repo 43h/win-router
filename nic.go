@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/pcap"
+	"log"
 	"net"
 	"strconv"
 	"strings"
+	"time"
 )
 
 /**
@@ -24,6 +26,7 @@ type Lan struct {
 	name    string
 	cfgName string
 	que     chan gopacket.Packet
+	handle  *pcap.Handle
 }
 
 type Wan struct {
@@ -34,6 +37,7 @@ type Wan struct {
 	name    string
 	cfgName string
 	que     chan gopacket.Packet
+	handle  *pcap.Handle
 }
 
 var lan Lan = Lan{rip: make(net.IP, 4), rmac: make(net.HardwareAddr, 6)}
@@ -165,4 +169,62 @@ func dumpNic() {
 	fmt.Println(" ip:     ", wan.ip.String())
 	fmt.Println(" mac:    ", wan.mac.String())
 	fmt.Println("gwmac:   ", wan.gwMac.String())
+}
+
+func getNicHandle(name string) (*pcap.Handle, bool) {
+	inactive, err := pcap.NewInactiveHandle(name)
+	if err != nil {
+		log.Println("lan-recv: fail to open nic, ", err)
+		return nil, false
+	}
+	defer inactive.CleanUp()
+
+	err = inactive.SetImmediateMode(true)
+	if err != nil {
+		log.Println("lan-recv: fail to set mode, ", err)
+		return nil, false
+	}
+
+	if err = inactive.SetTimeout(time.Second); err != nil {
+		if err != nil {
+			log.Println("lan-recv: fail to set timeout, ", err)
+			return nil, false
+		}
+	}
+	//if err = inactive.SetTimestampSource("foo"); err != nil {
+	//	log.Fatal(err)
+	//}
+
+	// Finally, create the actual handle by calling Activate:
+	handle, err := inactive.Activate() // after this, inactive is no longer valid
+	if err != nil {
+		log.Println("lan-recv: fail to active nic, ", err)
+		return nil, false
+	}
+
+	handle.SetDirection(pcap.DirectionIn)
+	return handle, true
+}
+
+func initNic() bool {
+	var rst bool
+	lan.handle, rst = getNicHandle(lan.name)
+	if rst == false {
+		return false
+	}
+
+	wan.handle, rst = getNicHandle(wan.name)
+	if rst == false {
+		return false
+	}
+	return true
+}
+
+func closeNic() {
+	if lan.handle != nil {
+		lan.handle.Close()
+	}
+	if wan.handle != nil {
+		wan.handle.Close()
+	}
 }

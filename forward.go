@@ -3,12 +3,9 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
 	"github.com/google/gopacket"
-	"github.com/google/gopacket/pcap"
 	"log"
 	"net"
-	"time"
 )
 
 var ipmap map[string]bool = map[string]bool{}
@@ -27,38 +24,7 @@ func forward() {
 }
 
 func recvLan() {
-	inactive, err := pcap.NewInactiveHandle(lan.name)
-	if err != nil {
-		fmt.Println("lan-recv: fail to open nic, ", err)
-		return
-	}
-	defer inactive.CleanUp()
-
-	err = inactive.SetImmediateMode(true)
-	if err != nil {
-		fmt.Println("lan-recv: fail to set mode, ", err)
-		return
-	}
-
-	if err = inactive.SetTimeout(time.Minute); err != nil {
-		if err != nil {
-			fmt.Println("lan-recv: fail to set timeout, ", err)
-			return
-		}
-	}
-	//if err = inactive.SetTimestampSource("foo"); err != nil {
-	//	log.Fatal(err)
-	//}
-
-	// Finally, create the actual handle by calling Activate:
-	handle, err := inactive.Activate() // after this, inactive is no longer valid
-	if err != nil {
-		fmt.Println("lan-recv: fail to active nic, ", err)
-		return
-	}
-	defer handle.Close()
-
-	handle.SetDirection(pcap.DirectionIn)
+	handle := lan.handle
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
 	for packet := range packetSource.Packets() {
 		if len(packet.Data()) < 34 { //mac header + ip header
@@ -84,7 +50,6 @@ func recvLan() {
 		}
 		_, ok := ipmap[string(packet.Data()[30:34])]
 		if !ok {
-			fmt.Println("lan-recv: ", packet.Data()[30:34])
 			ipmap[string(packet.Data()[30:34])] = true
 		}
 		wan.que <- packet
@@ -92,33 +57,7 @@ func recvLan() {
 }
 
 func sendLan() {
-	inactive, err := pcap.NewInactiveHandle(lan.name)
-	if err != nil {
-		log.Fatal(err)
-		return
-	}
-	defer inactive.CleanUp()
-
-	err = inactive.SetImmediateMode(true)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-	// Call various functions on inactive to set it up the way you'd like:
-	if err = inactive.SetTimeout(time.Minute); err != nil {
-		log.Fatal(err)
-	}
-	//if err = inactive.SetTimestampSource("foo"); err != nil {
-	//	log.Fatal(err)
-	//}
-
-	// Finally, create the actual handle by calling Activate:
-	handle, err := inactive.Activate() // after this, inactive is no longer valid
-	if err != nil {
-		log.Fatal(err)
-		return
-	}
-	defer handle.Close()
+	handle := lan.handle
 	for {
 		select {
 		case pkt := <-lan.que:
@@ -143,9 +82,9 @@ func sendLan() {
 				} else if bytes.Equal(pkt.Data()[23:24], []byte{0x11}) == true { //udp
 
 				}
-				err = handle.WritePacketData(pkt.Data())
+				err := handle.WritePacketData(pkt.Data())
 				if err != nil {
-					fmt.Println("lan-send: fail to send data, ", err)
+					log.Println("lan-send: fail to send data, ", err)
 				}
 			}
 		}
@@ -153,38 +92,7 @@ func sendLan() {
 }
 
 func recvWan() {
-	inactive, err := pcap.NewInactiveHandle(wan.name)
-	if err != nil {
-		fmt.Println("wan-recv: fail to open nic, ", err)
-		return
-	}
-	defer inactive.CleanUp()
-
-	err = inactive.SetImmediateMode(true)
-	if err != nil {
-		fmt.Println("wan-recv: fail to set mode, ", err)
-		return
-	}
-
-	if err = inactive.SetTimeout(time.Minute); err != nil {
-		if err != nil {
-			fmt.Println("wan-recv: fail to set timeout, ", err)
-			return
-		}
-	}
-	//if err = inactive.SetTimestampSource("foo"); err != nil {
-	//	log.Fatal(err)
-	//}
-
-	// Finally, create the actual handle by calling Activate:
-	handle, err := inactive.Activate() // after this, inactive is no longer valid
-	if err != nil {
-		fmt.Println("wan-recv: fail to active nic, ", err)
-		return
-	}
-	defer handle.Close()
-
-	handle.SetDirection(pcap.DirectionIn)
+	handle := wan.handle
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
 	for packet := range packetSource.Packets() {
 		if len(packet.Data()) < 34 { //mac header + ip header
@@ -209,33 +117,7 @@ func recvWan() {
 }
 
 func sendWan() {
-	inactive, err := pcap.NewInactiveHandle(wan.name)
-	if err != nil {
-		log.Fatal(err)
-		return
-	}
-	defer inactive.CleanUp()
-
-	err = inactive.SetImmediateMode(true)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-	// Call various functions on inactive to set it up the way you'd like:
-	if err = inactive.SetTimeout(time.Minute); err != nil {
-		log.Fatal(err)
-	}
-	//if err = inactive.SetTimestampSource("foo"); err != nil {
-	//	log.Fatal(err)
-	//}
-
-	// Finally, create the actual handle by calling Activate:
-	handle, err := inactive.Activate() // after this, inactive is no longer valid
-	if err != nil {
-		log.Fatal(err)
-		return
-	}
-	defer handle.Close()
+	handle := wan.handle
 	for {
 		select {
 		case pkt := <-wan.que:
@@ -259,9 +141,9 @@ func sendWan() {
 
 				}
 
-				err = handle.WritePacketData(pkt.Data())
+				err := handle.WritePacketData(pkt.Data())
 				if err != nil {
-					fmt.Println("wan-send: fail to send data, ", err)
+					log.Println("wan-send: fail to send data, ", err)
 				}
 			}
 		}
