@@ -8,15 +8,29 @@ import (
 	"net"
 )
 
-var ipmap map[string]bool = map[string]bool{}
+/**
+ * local pc<--->LAN|WAN<--->Intelnet
+ */
 
-func initForward() {
-	wan.que = make(chan gopacket.Packet, 10000)
-	lan.que = make(chan gopacket.Packet, 10000)
+type forwardTable struct {
+	lrip   net.IP           //PC侧IP
+	lrport uint16           //PC侧端口
+	lrmac  net.HardwareAddr //pc侧mac
+
+	wrip   net.IP           //Intelnet侧IP
+	wrport uint16           //Intelnet侧端口
+	wlport uint16           //port NAT
+	wrmac  net.HardwareAddr //上行出口mac
 }
 
+type forwardKey struct { //上行四元组流匹配
+	ip   [8]byte //源和目的IP
+	port [4]byte //源和目的端口
+}
+
+var forwordtable map[forwardKey]forwardTable = map[forwardKey]forwardTable{}
+
 func forward() {
-	initForward()
 	go recvLan()
 	go recvWan()
 	go sendLan()
@@ -24,6 +38,7 @@ func forward() {
 }
 
 func recvLan() {
+	lan := nicpool.lan.nic
 	handle := lan.handle
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
 	for packet := range packetSource.Packets() {
@@ -42,16 +57,6 @@ func recvLan() {
 			continue
 		}
 
-		func isIPInSubnet(ip net.IP, subnet net.IP, subnetMask net.IPMask) bool {
-			subnetIP := subnet.Mask(subnetMask)
-			return subnetIP.Equal(ip.Mask(subnetMask))
-		}
-
-		// Example usage:
-		ip := net.ParseIP("192.168.1.100")
-		subnet := net.ParseIP("192.168.1.0")
-		subnetMask := net.IPv4Mask(255, 255, 255, 0)
-		isInSubnet := isIPInSubnet(ip, subnet, subnetMask)
 		if lan.rflag == false {
 			lan.rip = make(net.IP, 4)
 			copy(lan.rip, packet.Data()[26:30])
@@ -69,6 +74,7 @@ func recvLan() {
 }
 
 func sendLan() {
+	lan := nicpool.lan.nic
 	handle := lan.handle
 	for {
 		select {
@@ -106,6 +112,7 @@ func sendLan() {
 }
 
 func recvWan() {
+	wan := nicpool.wan.nic
 	handle := wan.handle
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
 	for packet := range packetSource.Packets() {
@@ -132,6 +139,7 @@ func recvWan() {
 }
 
 func sendWan() {
+	wan := nicpool.wan.nic
 	handle := wan.handle
 	for {
 		select {

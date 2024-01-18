@@ -1,1 +1,2 @@
-go build main.go help.go conf.go nic.go forward.go log.go stat.go
+del main.exe
+go build main.go args.go conf.go nic.go log.go port.go version.go subnet.go

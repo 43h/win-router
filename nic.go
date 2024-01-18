@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/pcap"
 	"log"
@@ -11,58 +10,70 @@ import (
 	"time"
 )
 
-/**
- * local pc<--->LAN|WAN<--->Intelnet
- */
+const (
+	NICUNKNOWN = iota
+	NICLAN
+	NICWAN
+)
 
-type Lan struct {
-	valid   bool
-	ip      net.IP
-	mac     net.HardwareAddr
-	rip     net.IP
-	rmac    net.HardwareAddr
-	rflag   bool
-	maskLen uint32
-	name    string
-	cfgName string
-	que     chan gopacket.Packet
-	handle  *pcap.Handle
-	stat    statNic
+type NIC struct {
+	valid    bool
+	ip       net.IP //每个网卡暂时只支持一个IPv4，后续考虑支持多个IPv4
+	mac      net.HardwareAddr
+	netName  string
+	pcapName string
+	que      chan gopacket.Packet
+	handle   *pcap.Handle
+	//stat     statNic
 }
 
-type Wan struct {
-	valid   bool
-	ip      net.IP
-	mac     net.HardwareAddr
-	gwMac   net.HardwareAddr
-	name    string
-	cfgName string
-	que     chan gopacket.Packet
-	handle  *pcap.Handle
-	stat    statNic
+type LAN struct {
+	nic    NIC
+	subnet *subNet //检测子网
 }
 
-var lan Lan = Lan{rip: make(net.IP, 4), rmac: make(net.HardwareAddr, 6)}
-var wan Wan = Wan{}
+type WAN struct {
+	nic      NIC
+	portpool *PortPool //维护SNAT端口池
+}
 
-func parseNic(line string) {
-	nic := line[0:3]
-	name := line[5 : len(line)-1]
-	if nic == "lan" {
-		parseLanNic(name)
-	} else if nic == "wan" {
-		parseWanNic(name)
-	} else if nic == "gw:" { //Hack: add wan mac manually
-		wan.gwMac, _ = net.ParseMAC(line[3:])
+type NICPOOL struct { //暂时仅支持一个wan口，一个lan口
+	lan LAN
+	wan WAN
+}
+
+var nicpool NICPOOL = NICPOOL{}
+
+func parseNicConf(conftype int32, value string) bool {
+	switch conftype {
+	case CONFWANNAME:
+		nicpool.wan.nic.initNic(value)
+	case CONFWANMAC:
+		nicpool.wan.nic.mac, _ = net.ParseMAC(value)
+	case CONFWANPORT:
+		parts := strings.Split(value, "-")
+		if len(parts) != 2 {
+			return false
+		}
+		start, _ := strconv.Atoi(parts[0])
+		end, _ := strconv.Atoi(parts[1])
+		nicpool.wan.portpool = initPortPool(uint16(start), uint16(end))
+	case CONFLANNAME:
+		nicpool.lan.nic.initNic(value)
+	case CONFLANIP:
+		nicpool.lan.subnet, _ = initSubnet(value)
+	default:
 	}
+	return true
 }
 
-func parseLanNic(name string) {
-	lan.cfgName = name
+func (nic *NIC) initNic(name string) bool {
+	nname := name[1 : len(name)-1] //去掉前后引号
 	infs, _ := net.Interfaces()
 	for _, f := range infs {
-		if name == f.Name {
-			lan.mac = f.HardwareAddr
+		if nname == f.Name {
+			nic.netName = f.Name
+			nic.mac = f.HardwareAddr
 
 			address, err := f.Addrs()
 			if err == nil {
@@ -74,49 +85,24 @@ func parseLanNic(name string) {
 
 					index = strings.Index(value.String(), "/")
 					if index != -1 {
-						lan.ip = net.ParseIP(value.String()[0:index]).To4()
-						len, _ := strconv.Atoi(value.String()[index+1:])
-						lan.maskLen = uint32(len)
-						lan.valid = true
+						nic.ip = net.ParseIP(value.String()[0:index]).To4()
+						nic.valid = true
 					}
-					break
+					return true
 				}
+			} else {
+				log.Println("  fail to get ip address")
+				return false
 			}
 		}
 	}
+	return false
 }
 
-func parseWanNic(name string) {
-	wan.cfgName = name
-	infs, _ := net.Interfaces()
-	for _, f := range infs {
-		if name == f.Name {
-			wan.mac = f.HardwareAddr
-
-			address, err := f.Addrs()
-			if err == nil {
-				for _, value := range address {
-					index := strings.Index(value.String(), ":") //check ipv6
-					if index != -1 {                            //skip ipv6
-						continue
-					}
-
-					index = strings.Index(value.String(), "/") //127.0.0.1/28
-					if index != -1 {
-						wan.ip = net.ParseIP(value.String()[0:index]).To4()
-						wan.valid = true
-					}
-					break
-				}
-			}
-		}
-	}
-}
-
-func loopNicName() bool {
+func getNicPcapName() bool {
 	devices, err := pcap.FindAllDevs()
 	if err != nil {
-		fmt.Println(err)
+		log.Println(err)
 		return false
 	}
 
@@ -125,56 +111,18 @@ func loopNicName() bool {
 	//var device pcap.Interface
 	for _, d := range devices {
 		for _, value := range d.Addresses {
-			if value.IP.String() == lan.ip.String() {
-				lan.name = d.Name
-			} else if value.IP.String() == wan.ip.String() {
-				wan.name = d.Name
+			if value.IP.String() == nicpool.lan.nic.ip.String() {
+				nicpool.lan.nic.pcapName = d.Name
+			} else if value.IP.String() == nicpool.wan.nic.ip.String() {
+				nicpool.wan.nic.pcapName = d.Name
 			}
 		}
 	}
 	return true
 }
 
-func checkNic() bool {
-
-	if loopNicName() == false {
-		fmt.Println("fail to find device name")
-		dumpNic()
-		return false
-	}
-	dumpNic()
-	if lan.valid == true {
-		if wan.valid == true {
-
-			return true
-		}
-	}
-
-	return false
-}
-
-func dumpNic() {
-	fmt.Println("--------------")
-	fmt.Println("   lan:")
-	fmt.Println("cfg-name:", lan.cfgName)
-	fmt.Println(" name:   ", lan.name)
-	fmt.Println(" valid:  ", lan.valid)
-	fmt.Println(" ip:     ", lan.ip.String())
-	fmt.Println(" mac:    ", lan.mac.String())
-	fmt.Println(" maskLen:", lan.maskLen)
-
-	fmt.Println("--------------")
-	fmt.Println("   wan:")
-	fmt.Println("cfg-name:", wan.cfgName)
-	fmt.Println(" name:   ", wan.name)
-	fmt.Println(" valid:  ", wan.valid)
-	fmt.Println(" ip:     ", wan.ip.String())
-	fmt.Println(" mac:    ", wan.mac.String())
-	fmt.Println("gwmac:   ", wan.gwMac.String())
-}
-
-func getNicHandle(name string) (*pcap.Handle, bool) {
-	inactive, err := pcap.NewInactiveHandle(name)
+func (nic *NIC) initNicHandle() (*pcap.Handle, bool) {
+	inactive, err := pcap.NewInactiveHandle(nic.pcapName)
 	if err != nil {
 		log.Println("lan-recv: fail to open nic, ", err)
 		return nil, false
@@ -208,25 +156,41 @@ func getNicHandle(name string) (*pcap.Handle, bool) {
 	return handle, true
 }
 
-func initNic() bool {
-	var rst bool
-	lan.handle, rst = getNicHandle(lan.name)
-	if rst == false {
-		return false
-	}
+func (nic *NIC) dumpNic() {
+	log.Println("-------------------")
+	log.Println("valid: ", nic, nic.valid)
+	log.Println("ip: ", nic.ip.String())
+	log.Println("mac: ", nic.mac.String())
+	log.Println("netName: ", nic.netName)
+	log.Println("pcapName: ", nic.pcapName)
+}
 
-	wan.handle, rst = getNicHandle(wan.name)
-	if rst == false {
-		return false
-	}
+func initNicPool() bool {
+	getNicPcapName()
+	nicpool.lan.nic.initNicHandle()
+	nicpool.wan.nic.initNicHandle()
+
+	nicpool.wan.nic.que = make(chan gopacket.Packet, 10000)
+	nicpool.lan.nic.que = make(chan gopacket.Packet, 10000)
+
 	return true
 }
 
-func closeNic() {
-	if lan.handle != nil {
-		lan.handle.Close()
+func destoryNicPool() {
+	if nicpool.lan.nic.handle != nil {
+		nicpool.lan.nic.handle.Close()
 	}
-	if wan.handle != nil {
-		wan.handle.Close()
+	if nicpool.wan.nic.handle != nil {
+		nicpool.wan.nic.handle.Close()
 	}
+}
+
+func dumpNicPool() {
+	log.Println("NIC POOL:")
+	log.Println("  LAN:")
+	nicpool.lan.nic.dumpNic()
+	nicpool.lan.subnet.dumpSubnet()
+	log.Println("  WAN:")
+	nicpool.wan.nic.dumpNic()
+	nicpool.wan.portpool.dumpPortPool()
 }

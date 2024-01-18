@@ -12,22 +12,17 @@ func main() {
 		return
 	}
 
-	if parseConf() == false{
-		return
-	}
-
 	initLog()
 	defer closeLog()
 
-	if checkNic() == false {
-		return
-	}
+	loadConf()
 
-	if initNic() == false {
-		return
-	}
-	defer closeNic()
-	
+	initNicPool()
+	defer destoryNicPool()
+	dumpNicPool()
+
 	forward()
-	showStat()
+	for {
+
+	}
 }
