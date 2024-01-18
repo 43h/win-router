@@ -41,6 +41,17 @@ func recvLan() {
 		if bytes.Equal(packet.Data()[30:34], lan.ip) == true { // skip dst ip == self ip
 			continue
 		}
+
+		func isIPInSubnet(ip net.IP, subnet net.IP, subnetMask net.IPMask) bool {
+			subnetIP := subnet.Mask(subnetMask)
+			return subnetIP.Equal(ip.Mask(subnetMask))
+		}
+
+		// Example usage:
+		ip := net.ParseIP("192.168.1.100")
+		subnet := net.ParseIP("192.168.1.0")
+		subnetMask := net.IPv4Mask(255, 255, 255, 0)
+		isInSubnet := isIPInSubnet(ip, subnet, subnetMask)
 		if lan.rflag == false {
 			lan.rip = make(net.IP, 4)
 			copy(lan.rip, packet.Data()[26:30])

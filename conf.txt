@@ -1,3 +1,5 @@
 wan:"以太网"
-gw:f8-56-c3-12-1a-be
-lan:"VMware Network Adapter VMnet1"
+wmac:f8-56-c3-12-1a-be
+wip:10.0.0.0/24
+wanport:10000-40000
+lan:"VMware Network Adapter VMnet8"
