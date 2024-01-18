@@ -73,7 +73,7 @@ func (p *PortPool) uesd() uint16 {
 }
 
 func (p *PortPool) dumpPortPool() {
-	log.Println("port pool:")
+	log.Println("--port pool--")
 	log.Println("start:", p.start)
 	log.Println("end:  ", p.end)
 	log.Println("size: ", p.size)

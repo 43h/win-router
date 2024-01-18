@@ -23,6 +23,5 @@ func main() {
 
 	forward()
 	for {
-
 	}
 }

@@ -23,7 +23,7 @@ func (sunnet *subNet) isIPInSubnet(ip net.IP) bool {
 }
 
 func (sunnet *subNet) dumpSubnet() {
-	log.Println("  subnet: ")
+	log.Println("  --subnet-- ")
 	log.Println("  ip:   ", sunnet.ip.String())
 	log.Println("  mask: ", sunnet.mask.String())
 }

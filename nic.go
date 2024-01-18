@@ -34,7 +34,8 @@ type LAN struct {
 
 type WAN struct {
 	nic      NIC
-	portpool *PortPool //维护SNAT端口池
+	portpool *PortPool        //维护SNAT端口池
+	mac      net.HardwareAddr //上行mac地址
 }
 
 type NICPOOL struct { //暂时仅支持一个wan口，一个lan口
@@ -49,7 +50,7 @@ func parseNicConf(conftype int32, value string) bool {
 	case CONFWANNAME:
 		nicpool.wan.nic.initNic(value)
 	case CONFWANMAC:
-		nicpool.wan.nic.mac, _ = net.ParseMAC(value)
+		nicpool.wan.mac, _ = net.ParseMAC(value)
 	case CONFWANPORT:
 		parts := strings.Split(value, "-")
 		if len(parts) != 2 {
@@ -121,24 +122,24 @@ func getNicPcapName() bool {
 	return true
 }
 
-func (nic *NIC) initNicHandle() (*pcap.Handle, bool) {
+func (nic *NIC) initNicHandle() bool {
 	inactive, err := pcap.NewInactiveHandle(nic.pcapName)
 	if err != nil {
 		log.Println("lan-recv: fail to open nic, ", err)
-		return nil, false
+		return false
 	}
 	defer inactive.CleanUp()
 
 	err = inactive.SetImmediateMode(true)
 	if err != nil {
 		log.Println("lan-recv: fail to set mode, ", err)
-		return nil, false
+		return false
 	}
 
 	if err = inactive.SetTimeout(time.Second); err != nil {
 		if err != nil {
 			log.Println("lan-recv: fail to set timeout, ", err)
-			return nil, false
+			return false
 		}
 	}
 	//if err = inactive.SetTimestampSource("foo"); err != nil {
@@ -149,16 +150,17 @@ func (nic *NIC) initNicHandle() (*pcap.Handle, bool) {
 	handle, err := inactive.Activate() // after this, inactive is no longer valid
 	if err != nil {
 		log.Println("lan-recv: fail to active nic, ", err)
-		return nil, false
+		return false
 	}
 
 	handle.SetDirection(pcap.DirectionIn)
-	return handle, true
+	nic.handle = handle
+	return true
 }
 
 func (nic *NIC) dumpNic() {
 	log.Println("-------------------")
-	log.Println("valid: ", nic, nic.valid)
+	log.Println("valid: ", nic.valid)
 	log.Println("ip: ", nic.ip.String())
 	log.Println("mac: ", nic.mac.String())
 	log.Println("netName: ", nic.netName)
@@ -192,5 +194,6 @@ func dumpNicPool() {
 	nicpool.lan.subnet.dumpSubnet()
 	log.Println("  WAN:")
 	nicpool.wan.nic.dumpNic()
+	log.Println("  mac:", nicpool.wan.mac.String())
 	nicpool.wan.portpool.dumpPortPool()
 }
