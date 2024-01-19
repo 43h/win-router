@@ -17,7 +17,7 @@ func loadConf() {
 
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
-		parseNic(scanner.Text())
+		parseLine(scanner.Text())
 	}
 }
 

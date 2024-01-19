@@ -1,3 +1,5 @@
 wan:"以太网"
-gw:f8-56-c3-12-1a-be
+wanrmac:f8-56-c3-12-1a-be
 lan:"VMware Network Adapter VMnet1"
+lanrip:192.168.2.128
+lanrmac:00-0c-29-05-88-5e
