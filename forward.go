@@ -8,15 +8,9 @@ import (
 	"net"
 )
 
-var ipmap map[string]bool = map[string]bool{}
-
-func initForward() {
-	wan.que = make(chan gopacket.Packet, 10000)
-	lan.que = make(chan gopacket.Packet, 10000)
-}
+var ipmap map[string]bool = map[string]bool{} //记录上行IP
 
 func forward() {
-	initForward()
 	go recvLan()
 	go recvWan()
 	go sendLan()
@@ -41,13 +35,11 @@ func recvLan() {
 		if bytes.Equal(packet.Data()[30:34], lan.ip) == true { // skip dst ip == self ip
 			continue
 		}
-		if lan.rflag == false {
-			lan.rip = make(net.IP, 4)
-			copy(lan.rip, packet.Data()[26:30])
-			lan.rmac = make(net.HardwareAddr, 6)
-			copy(lan.rmac, packet.Data()[6:12])
-			lan.rflag = true
+
+		if bytes.Equal(packet.Data()[26:30], lan.rip) == false {
+			continue
 		}
+
 		_, ok := ipmap[string(packet.Data()[30:34])]
 		if !ok {
 			ipmap[string(packet.Data()[30:34])] = true
@@ -73,7 +65,7 @@ func sendLan() {
 
 				//calculate ip checksum
 				copy(pkt.Data()[24:26], []byte{0, 0})
-				checksum := checksum(pkt.Data()[14:34])
+				checksum := ipchecksum(pkt.Data()[14:34])
 				copy(pkt.Data()[24:26], []byte{byte(checksum >> 8), byte(checksum & 0xff)}) //set ip checksum
 
 				//update tcp checksum
@@ -127,14 +119,14 @@ func sendWan() {
 		case pkt := <-wan.que:
 			{
 				//replace dst mac
-				copy(pkt.Data()[0:6], wan.gwMac)
+				copy(pkt.Data()[0:6], wan.rmac)
 				//replace src mac
 				copy(pkt.Data()[6:12], wan.mac)
 				//replace source ip
 				copy(pkt.Data()[26:30], wan.ip)
 				copy(pkt.Data()[24:26], []byte{0, 0}) //set ip checksum
 				//calculate ip checksum
-				checksum := checksum(pkt.Data()[14:34])
+				checksum := ipchecksum(pkt.Data()[14:34])
 				copy(pkt.Data()[24:26], []byte{byte(checksum >> 8), byte(checksum & 0xff)}) //set ip checksum
 
 				//update tcp checksum
@@ -155,7 +147,7 @@ func sendWan() {
 	}
 }
 
-func checksum(data []byte) uint16 {
+func ipchecksum(data []byte) uint16 {
 	var (
 		sum    uint32
 		length int = len(data)
