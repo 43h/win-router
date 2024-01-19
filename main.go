@@ -5,7 +5,7 @@ import (
 	"os"
 )
 
-const version = "0.1.1-20240102\n"
+const version = "0.1.1-1to1-20240120\n"
 
 func parseArg(arg []string) bool {
 	var argNum = len(arg)
@@ -37,23 +37,17 @@ func parseArg(arg []string) bool {
 func main() {
 	fmt.Println("win-router version:", version)
 	if parseArg(os.Args) == false {
-
-		return
-	}
-
-	loadConf()
-	if checkNic() == false {
-
 		return
 	}
 
 	initLog()
 	defer closeLog()
 
-	if initNic() == false {
-		return
-	}
-	defer closeNic()
+	loadConf()
+
+	initNics()
+	defer closeNics()
+
 	forward()
 
 	showStat()
