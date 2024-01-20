@@ -5,7 +5,7 @@ import (
 	"os"
 )
 
-const version = "0.1.1-1to1-20240120\n"
+const version = "0.1.2-1to1-20240121\n"
 
 func parseArg(arg []string) bool {
 	var argNum = len(arg)
