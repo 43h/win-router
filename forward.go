@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
 	"log"
 	"net"
 )
@@ -44,7 +45,9 @@ func recvLan() {
 		if !ok {
 			ipmap[string(packet.Data()[30:34])] = true
 		}
+		log.Println("packet len rcv:", uint32(len(packet.Data())))
 		lan.stat.rx += uint32(len(packet.Data()))
+		lan.stat.rxall += 1
 		wan.que <- packet
 	}
 }
@@ -55,31 +58,35 @@ func sendLan() {
 		select {
 		case pkt := <-lan.que:
 			{
+				data := pkt.Data()
+				data = data[:getdatalen(pkt)]
 				//replace dst mac
-				copy(pkt.Data()[0:6], lan.rmac)
+				copy(data[0:6], lan.rmac)
 				//replace src mac
-				copy(pkt.Data()[6:12], lan.mac)
+				copy(data[6:12], lan.mac)
 
 				//replace dst ip
-				copy(pkt.Data()[30:34], lan.rip)
+				copy(data[30:34], lan.rip)
 
 				//calculate ip checksum
-				copy(pkt.Data()[24:26], []byte{0, 0})
+				copy(data[24:26], []byte{0, 0})
 				checksum := ipchecksum(pkt.Data()[14:34])
-				copy(pkt.Data()[24:26], []byte{byte(checksum >> 8), byte(checksum & 0xff)}) //set ip checksum
+				copy(data[24:26], []byte{byte(checksum >> 8), byte(checksum & 0xff)}) //set ip checksum
 
 				//update tcp checksum
-				if bytes.Equal(pkt.Data()[23:24], []byte{0x06}) == true { //tcp
-					checksum = tcpchecksum(pkt.Data()[34:], pkt.Data()[26:30], pkt.Data()[30:34])
-					copy(pkt.Data()[50:52], []byte{byte(checksum >> 8), byte(checksum & 0xff)}) //set tcp checksum
-				} else if bytes.Equal(pkt.Data()[23:24], []byte{0x11}) == true { //udp
+				if bytes.Equal(data[23:24], []byte{0x06}) == true { //tcp
+					checksum = tcpchecksum(data[34:], data[26:30], data[30:34])
+					copy(data[50:52], []byte{byte(checksum >> 8), byte(checksum & 0xff)}) //set tcp checksum
+				} else if bytes.Equal(data[23:24], []byte{0x11}) == true { //udp
 
 				}
-				lan.stat.tx += uint32(len(pkt.Data()))
-				err := handle.WritePacketData(pkt.Data())
+				lan.stat.tx += uint32(len(data))
+				err := handle.WritePacketData(data)
 				if err != nil {
 					lan.stat.txRrr += 1
 					log.Println("lan-send: fail to send data, ", err)
+				} else {
+					lan.stat.txall += 1
 				}
 			}
 		}
@@ -107,6 +114,7 @@ func recvWan() {
 		_, ok := ipmap[string(packet.Data()[26:30])]
 		if ok {
 			wan.stat.rx += uint32(len(packet.Data()))
+			wan.stat.rxall += 1
 			lan.que <- packet
 		}
 	}
@@ -118,29 +126,35 @@ func sendWan() {
 		select {
 		case pkt := <-wan.que:
 			{
+				data := pkt.Data()
+				data = data[:getdatalen(pkt)]
 				//replace dst mac
-				copy(pkt.Data()[0:6], wan.rmac)
+				copy(data[0:6], wan.rmac)
 				//replace src mac
-				copy(pkt.Data()[6:12], wan.mac)
+				copy(data[6:12], wan.mac)
 				//replace source ip
-				copy(pkt.Data()[26:30], wan.ip)
-				copy(pkt.Data()[24:26], []byte{0, 0}) //set ip checksum
+				copy(data[26:30], wan.ip)
+
 				//calculate ip checksum
-				checksum := ipchecksum(pkt.Data()[14:34])
-				copy(pkt.Data()[24:26], []byte{byte(checksum >> 8), byte(checksum & 0xff)}) //set ip checksum
+				copy(data[24:26], []byte{0, 0}) //set ip checksum
+				checksum := ipchecksum(data[14:34])
+				copy(data[24:26], []byte{byte(checksum >> 8), byte(checksum & 0xff)}) //set ip checksum
 
 				//update tcp checksum
-				if bytes.Equal(pkt.Data()[23:24], []byte{0x06}) == true { //tcp
-					checksum = tcpchecksum(pkt.Data()[34:], pkt.Data()[26:30], pkt.Data()[30:34])
-					copy(pkt.Data()[50:52], []byte{byte(checksum >> 8), byte(checksum & 0xff)}) //set tcp checksum
-				} else if bytes.Equal(pkt.Data()[23:24], []byte{0x11}) == true { //udp
+				if bytes.Equal(data[23:24], []byte{0x06}) == true { //tcp
+
+					checksum = tcpchecksum(data[34:], data[26:30], data[30:34])
+					copy(data[50:52], []byte{byte(checksum >> 8), byte(checksum & 0xff)}) //set tcp checksum
+				} else if bytes.Equal(data[23:24], []byte{0x11}) == true { //udp
 
 				}
-				wan.stat.tx += uint32(len(pkt.Data()))
-				err := handle.WritePacketData(pkt.Data())
+				wan.stat.tx += uint32(len(data))
+				err := handle.WritePacketData(data)
 				if err != nil {
 					wan.stat.txRrr += 1
 					log.Println("wan-send: fail to send data, ", err)
+				} else {
+					wan.stat.txall += 1
 				}
 			}
 		}
@@ -206,7 +220,6 @@ func tcpchecksum(data []byte, srcIP, dstIP net.IP) uint16 {
 	copy(pHeader.DestinationAddress[:], dstIP.To4())
 	pHeader.Protocol = 6                  // TCP protocol number
 	pHeader.TCPLength = uint16(len(data)) // TCP header length
-
 	pHeaderBytes := make([]byte, 12)
 	binary.BigEndian.PutUint32(pHeaderBytes[0:], binary.BigEndian.Uint32(pHeader.SourceAddress[:]))
 	binary.BigEndian.PutUint32(pHeaderBytes[4:], binary.BigEndian.Uint32(pHeader.DestinationAddress[:]))
@@ -217,4 +230,13 @@ func tcpchecksum(data []byte, srcIP, dstIP net.IP) uint16 {
 	data[17] = 0
 	check := append(pHeaderBytes, data...)
 	return caltcpchecksum(check)
+}
+
+func getdatalen(packet gopacket.Packet) uint16 {
+	ipLayer := packet.Layer(layers.LayerTypeIPv4)
+	if ipLayer != nil {
+		ip, _ := ipLayer.(*layers.IPv4)
+		return ip.Length + 14
+	}
+	return 0
 }
