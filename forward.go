@@ -45,7 +45,7 @@ func recvLan() {
 		if !ok {
 			ipmap[string(packet.Data()[30:34])] = true
 		}
-		log.Println("packet len rcv:", uint32(len(packet.Data())))
+		
 		lan.stat.rx += uint32(len(packet.Data()))
 		lan.stat.rxall += 1
 		wan.que <- packet
