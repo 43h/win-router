@@ -11,6 +11,9 @@ PC<----->LAN|WAN<----->INTERNET
 go version go1.21.0 windows/amd64  
 Windows 11 专业版  23H2 22631.2861
 
+## 功能
+仅支持单台PC,单lan口,单wan口
+单纯转发版本
 
 ## 局限
 目前lan侧仅支持一台PC  
