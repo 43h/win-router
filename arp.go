@@ -3,9 +3,13 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"log"
 	"net"
 	"os/exec"
 	"strings"
+	"time"
+
+	"github.com/mdlayher/arp"
 )
 
 type ARPItem struct {
@@ -53,4 +57,46 @@ func getArpByIp(ip net.IP) net.HardwareAddr {
 		}
 	}
 	return nil
+}
+
+func request() {
+	// 设置网络接口
+	ifi, err := net.InterfaceByName("eth0")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// 创建ARP客户端
+	client, err := arp.Dial(ifi)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer client.Close()
+
+	// 设置目标IP地址
+	ip := net.IPv4(192, 168, 1, 1)
+
+	// 发送ARP请求
+	if err := client.Request(ip); err != nil {
+		log.Fatal(err)
+	}
+
+	// 等待ARP回复
+	for {
+		msg, _, err := client.Read()
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		// 如果收到的是ARP回复，并且源IP地址与目标IP地址相同，则打印源硬件地址
+		if msg.Operation == arp.OperationReply && msg.SenderIP.Equal(ip) {
+			log.Println("ARP reply from", msg.SenderHardwareAddr)
+			return
+		}
+
+		// 如果在5秒内没有收到ARP回复，则退出
+		if time.Since(msg.Time) > 5*time.Second {
+			log.Fatal("timeout")
+		}
+	}
 }

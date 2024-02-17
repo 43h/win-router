@@ -24,5 +24,7 @@ func initLog() bool {
 }
 
 func closeLog() {
-	logHandle.Close()
+	if logHandle {
+		logHandle.Close()
+	}
 }

@@ -5,7 +5,7 @@
 PC<----->LAN|WAN<----->INTERNET
 
 ## 原理
-监听两个网口，流量互转
+PCAP监听网口，流量互转
 
 ## 编译环境
 go version go1.21.0 windows/amd64  
@@ -27,7 +27,6 @@ wan口侧需要手动配置下一条mac地址
 
 ## 未完成
 * 支持arp
-* udp checksum
 * 网口流量监听，兴趣流过滤
 * 编写界面
 * 支持多wan口和lan口
