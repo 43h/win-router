@@ -2,8 +2,9 @@ package main
 
 import (
 	"fmt"
-	"github.com/rivo/tview"
 	"time"
+
+	"github.com/rivo/tview"
 )
 
 type statNic struct {
@@ -14,7 +15,6 @@ type statNic struct {
 	txall uint32
 }
 
-// 用于打印输出
 var lanStat statNic
 var wanStat statNic
 
