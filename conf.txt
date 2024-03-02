@@ -1,5 +1,2 @@
 wan:"以太网"
-wmac:f8-56-c3-12-1a-be
-wport:50000-60000
 lan:"VMware Network Adapter VMnet1"
-lip:192.168.2.0/24
