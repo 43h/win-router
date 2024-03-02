@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 )
@@ -11,16 +12,16 @@ const confFile = "conf.txt"
 
 const (
 	CONFWANNAME = iota
-	CONFWANMAC
-	CONFWANPORT
+	CONFWANGW   //WAN口网关
 	CONFLANNAME
-	CONFLANIP
+	CONFLANGW //LAN口网关
 )
 
-func loadConf() {
+func loadConf() bool {
 	f, err := os.Open(confFile)
 	if err != nil {
 		fmt.Println(err)
+		return false
 	}
 	defer f.Close()
 
@@ -28,6 +29,7 @@ func loadConf() {
 	for scanner.Scan() {
 		parseLine(scanner.Text())
 	}
+	return true
 }
 
 func parseLine(line string) bool {
@@ -38,19 +40,17 @@ func parseLine(line string) bool {
 
 	key := parts[0]
 	value := parts[1]
-
+	fmt.Println(key, value)
 	if key == "wan" {
-		parseNicConf(CONFWANNAME, value)
-	} else if key == "wmac" {
-		parseNicConf(CONFWANMAC, value)
-	} else if key == "wport" {
-		parseNicConf(CONFWANPORT, value)
+		addNic(CONFWANNAME, value)
 	} else if key == "lan" {
-		parseNicConf(CONFLANNAME, value)
-	} else if key == "lip" {
-		parseNicConf(CONFLANIP, value)
+		addNic(CONFLANNAME, value)
+	} else if key == "wangw" {
+		setNicGw(CONFWANGW, value)
+	} else if key == "langw" {
+		setNicGw(CONFLANGW, value)
 	} else {
-		fmt.Println("  unknown param")
+		log.Println("  unknown param")
 		return false
 	}
 	return true
