@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"github.com/google/gopacket/pcap"
-	"log"
 	"net"
 )
 
@@ -13,35 +12,35 @@ func parseArg(arg []string) bool {
 		return true
 	} else if argNum == 2 {
 		if arg[1] == "-h" || arg[1] == "--help" {
-			showHelpInfo()
+			showHelp()
 		} else if arg[1] == "-n" {
-			showNicInfo2()
-		} else if arg[1] == "-nn" {
-			showNicInfo()
+			showNicByNet()
+		} else if arg[1] == "-p" {
+			showNicByPcap()
 		} else if arg[1] == "-d" {
 			dumpConf()
+		} else if arg[1] == "-l" {
+			logFileFlag = false
 		} else {
 			fmt.Println("  unknown param\nexit")
-			showHelpInfo()
+			showHelp()
 		}
-		return false
+		return true
 	} else {
 		fmt.Println("  unknown param")
-		showHelpInfo()
+		showHelp()
 		return false
 	}
-
-	return true
 }
 
-func showHelpInfo() {
+func showHelp() {
 	fmt.Println("-h: help")
-	fmt.Println("-n: show NIC")
-	fmt.Println("-nn: show NIC")
+	fmt.Println("-n: show NIC by net")
+	fmt.Println("-p: show NIC by pcap")
 	fmt.Println("-d: dump conf")
 }
 
-func showNicInfo() {
+func showNicByPcap() {
 	devices, err := pcap.FindAllDevs()
 	if err != nil {
 		panic(err)
@@ -62,42 +61,14 @@ func showNicInfo() {
 	}
 }
 
-func showNicInfo1() {
-	// Find all devices
-	// 获取所有网卡
-	devices, err := pcap.FindAllDevs()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// Find exact device
-	// 根据网卡名称从所有网卡中取到精确的网卡
-	//var device pcap.Interface
-	for _, d := range devices {
-		fmt.Println(d.Name)
-		////if d.Name == *deviceName {
-		//	device = d
-		//}
-	}
-
-	// 根据网卡的ipv4地址获取网卡的mac地址，用于后面判断数据包的方向
-	//macAddr, err := findMacAddrByIp(findDeviceIpv4(device))
-	//if err != nil {
-	//	panic(err)
-	//}
-
-	//fmt.Printf("Chosen device's IPv4: %s\n", findDeviceIpv4(device))
-	//fmt.Printf("Chosen device's MAC: %s\n", macAddr)
-}
-
-func showNicInfo2() {
-	infs, err := net.Interfaces()
+func showNicByNet() {
+	ifs, err := net.Interfaces()
 	if err != nil {
 		panic(err)
 	}
 
 	fmt.Println("Net Devices")
-	for _, f := range infs {
+	for _, f := range ifs {
 		fmt.Println("-----------------------")
 		fmt.Println("  Name:        ", f.Name)
 		fmt.Println("  MAC:         ", f.HardwareAddr)
