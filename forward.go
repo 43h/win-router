@@ -13,44 +13,85 @@ import (
  * local pc<--->LAN|WAN<--->Intelnet
  */
 
-type forwardTable struct {
-	lrip   net.IP           //PC侧IP
-	lrport uint16           //PC侧端口
-	lrmac  net.HardwareAddr //pc侧mac
+const (
+	MACDSTSTART  = 0
+	MACDSTEND    = 6
+	MACSRCSTART  = 6
+	MACSRCEND    = 12
+	IPSRCSTART   = 26
+	IPSRCEND     = 30
+	IPDSTSTART   = 30
+	IPDSTEND     = 34
+	PORTSRCSTART = 34
+	PORTSRCEND   = 36
+	PORTDSTSTART = 36
+	PORTDSTEND   = 38
+)
 
-	wrip   net.IP           //Intelnet侧IP
-	wrport uint16           //Intelnet侧端口
-	wlport uint16           //port NAT
-	wrmac  net.HardwareAddr //上行出口mac
-}
-
-type forwardKey struct { //上行四元组流匹配
-	ip   [8]byte //源和目的IP
-	port [4]byte //源和目的端口
-}
-
-var forwordtable map[forwardKey]forwardTable = map[forwardKey]forwardTable{}
+var forwordtable map[uint16]string = map[uint16]string{}
+var forwardiplist map[string]bool = map[string]bool{} //转发ip列表
 
 func forward() {
-	go recvLan()
-	go recvWan()
-	go sendLan()
-	go sendWan()
+	var lan, wan *NIC
+	for _, nic := range nics {
+		if nic.nicType == NICLAN {
+			lan = &nic
+		} else if nic.nicType == NICWAN {
+			wan = &nic
+		}
+	}
+
+	go rcvPkt(lan)
+	go rcvPkt(wan)
+
+	var pkt gopacket.Packet
+	var fromlan bool
+	for {
+		select {
+		case pkt = <-lan.que:
+			fromlan = true
+		case pkt = <-wan.que:
+			fromlan = false
+		}
+		data := pkt.Data()
+		//start to handle pkt
+		if fromlan == true { //from lan, to wan
+			_, ok := forwardiplist[string(data[IPDSTSTART:IPDSTEND])] //记录上行ip
+			if !ok {
+				forwardiplist[string(data[IPDSTSTART:IPDSTEND])] = true
+			}
+			//使用源端口标识流
+			srcPort := binary.BigEndian.Uint16(data[PORTSRCSTART:PORTSRCEND])
+			_, ok = forwordtable[srcPort]
+			if !ok {
+				forwordtable[srcPort] = string(data[IPSRCSTART:IPSRCEND])
+			} else {
+				forwordtable[srcPort] = string(data[IPSRCSTART:IPSRCEND])
+			}
+			//记录ip与mac
+			addArp(string(pkt.Data()[IPSRCSTART:IPSRCEND]), string(data[MACSRCSTART:MACSRCEND]))
+			handleLanPkt(pkt, wan)
+		} else { //from wan, to lan
+			log.Println("from wan")
+			_, ok := forwardiplist[string(data[IPSRCSTART:IPSRCEND])] //检测下行源ip
+			if !ok {
+				log.Println("drop", data[26:30])
+				continue
+			}
+			handleWanData(pkt, lan)
+		}
+	}
 }
 
-func recvLan() {
-	lan := nicpool.lan
-	wan := nicpool.wan
-	lnic := nicpool.lan.nic
-
-	handle := lan.nic.handle
+func rcvPkt(nic *NIC) {
+	handle := nic.handle
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
 	for packet := range packetSource.Packets() {
 		if len(packet.Data()) < 34 { //mac header + ip header
 			continue
 		}
 
-		if bytes.Equal(packet.Data()[0:6], lnic.mac) == false { //promiscuous mode,dst mac != self mac
+		if bytes.Equal(packet.Data()[MACDSTSTART:MACDSTEND], nic.mac) == false { //dst mac != self mac
 			continue
 		}
 
@@ -58,138 +99,100 @@ func recvLan() {
 			continue
 		}
 
-		if bytes.Equal(packet.Data()[30:34], lnic.ip) == true { // skip dst ip == self ip
-			continue
-		}
-
-		if lan.subnet.isIPInSubnet(packet.Data()[30:34]) == false { //filter by subnet
-			continue
-		}
-		fmt.Println("bingo")
-		
-		//if lan.rflag == false {
-		//	lan.rip = make(net.IP, 4)
-		//	copy(lan.rip, packet.Data()[26:30])
-		//	lan.rmac = make(net.HardwareAddr, 6)
-		//	copy(lan.rmac, packet.Data()[6:12])
-		//	lan.rflag = true
-		//}
-		//_, ok := ipmap[string(packet.Data()[30:34])]
-		//if !ok {
-		//	ipmap[string(packet.Data()[30:34])] = true
-		//}
-
-		wan.nic.que <- packet
-	}
-}
-
-func sendLan() {
-	handle := lan.handle
-	for {
-		select {
-		case pkt := <-lan.que:
-			{
-				data := pkt.Data()
-				data = data[:getdatalen(pkt)]
-				//replace dst mac
-				copy(data[0:6], lan.rmac)
-				//replace src mac
-				copy(data[6:12], lan.mac)
-
-				//replace dst ip
-				copy(data[30:34], lan.rip)
-
-				//calculate ip checksum
-				copy(data[24:26], []byte{0, 0})
-				checksum := ipchecksum(pkt.Data()[14:34])
-				copy(data[24:26], []byte{byte(checksum >> 8), byte(checksum & 0xff)}) //set ip checksum
-
-				//update tcp checksum
-				if bytes.Equal(data[23:24], []byte{0x06}) == true { //tcp
-					checksum = tcpchecksum(data[34:], data[26:30], data[30:34])
-					copy(data[50:52], []byte{byte(checksum >> 8), byte(checksum & 0xff)}) //set tcp checksum
-				} else if bytes.Equal(data[23:24], []byte{0x11}) == true { //udp
-
-				}
-				lan.stat.tx += uint32(len(data))
-				err := handle.WritePacketData(data)
-				if err != nil {
-					lan.stat.txRrr += 1
-					log.Println("lan-send: fail to send data, ", err)
-				} else {
-					lan.stat.txall += 1
-				}
+		if nic.nicType == NICLAN {
+			if bytes.Equal(packet.Data()[IPDSTSTART:IPDSTEND], nic.ip) == true { // skip dst ip == self ip
+				continue
 			}
 		}
+
+		if bytes.Equal(packet.Data()[23:24], []byte{0x11}) == true { // skip udp do it later
+			continue
+		}
+
+		nic.que <- packet
 	}
 }
 
-func recvWan() {
-	handle := wan.handle
-	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
-	for packet := range packetSource.Packets() {
-		if len(packet.Data()) < 34 { //mac header + ip header
-			continue
-		}
-		if bytes.Equal(packet.Data()[0:6], wan.mac) == false { //promiscuous mode,dst mac != self mac
-			continue
-		}
-
-		if bytes.Equal(packet.Data()[12:14], []byte{0x08, 0x00}) == false { //skip !ipv4
-			continue
-		}
-
-		if bytes.Equal(packet.Data()[30:34], wan.ip) == false { // skip dst ip != self ip
-			continue
-		}
-		_, ok := ipmap[string(packet.Data()[26:30])]
-		if ok {
-			wan.stat.rx += uint32(len(packet.Data()))
-			wan.stat.rxall += 1
-			lan.que <- packet
-		}
+func handleWanData(pkt gopacket.Packet, nic *NIC) bool {
+	data := pkt.Data()
+	data = data[:getdatalen(pkt)]
+	log.Println("handleWanData", data)
+	dstPort := binary.BigEndian.Uint16(pkt.Data()[36:38])
+	v, ok := forwordtable[dstPort]
+	if ok {
+		//replace dst ip
+		log.Println("get dst ip", v)
+		copy(data[IPDSTSTART:IPDSTEND], v)
 	}
+
+	mac, ok := getArp(v)
+	if ok {
+		//replace dst mac
+		copy(data[MACDSTSTART:MACDSTEND], mac)
+		log.Println("get dst mac", mac)
+	} else {
+		log.Println("no dst mac")
+	}
+	//replace src mac
+	copy(data[MACSRCSTART:MACSRCEND], nic.mac)
+
+	//calculate ip checksum
+	copy(data[24:26], []byte{0, 0})
+	checksum := ipchecksum(pkt.Data()[14:34])
+	copy(data[24:26], []byte{byte(checksum >> 8), byte(checksum & 0xff)}) //set ip checksum
+
+	//update tcp checksum
+	if bytes.Equal(data[23:24], []byte{0x06}) == true { //tcp
+		checksum = tcpchecksum(data[34:], data[26:30], data[30:34])
+		copy(data[50:52], []byte{byte(checksum >> 8), byte(checksum & 0xff)}) //set tcp checksum
+	} else if bytes.Equal(data[23:24], []byte{0x11}) == true { //udp
+
+	}
+	log.Println("forward to lan", data)
+	err := nic.handle.WritePacketData(data)
+	if err == nil {
+		log.Println("forward to lan success")
+		return true
+	} else {
+		log.Println("forward to lan fail")
+	}
+	return false
 }
 
-func sendWan() {
-	handle := wan.handle
-	for {
-		select {
-		case pkt := <-wan.que:
-			{
-				data := pkt.Data()
-				data = data[:getdatalen(pkt)]
-				//replace dst mac
-				copy(data[0:6], wan.rmac)
-				//replace src mac
-				copy(data[6:12], wan.mac)
-				//replace source ip
-				copy(data[26:30], wan.ip)
+func handleLanPkt(pkt gopacket.Packet, nic *NIC) bool {
+	data := pkt.Data()
+	data = data[:getdatalen(pkt)]
 
-				//calculate ip checksum
-				copy(data[24:26], []byte{0, 0}) //set ip checksum
-				checksum := ipchecksum(data[14:34])
-				copy(data[24:26], []byte{byte(checksum >> 8), byte(checksum & 0xff)}) //set ip checksum
-
-				//update tcp checksum
-				if bytes.Equal(data[23:24], []byte{0x06}) == true { //tcp
-
-					checksum = tcpchecksum(data[34:], data[26:30], data[30:34])
-					copy(data[50:52], []byte{byte(checksum >> 8), byte(checksum & 0xff)}) //set tcp checksum
-				} else if bytes.Equal(data[23:24], []byte{0x11}) == true { //udp
-
-				}
-				wan.stat.tx += uint32(len(data))
-				err := handle.WritePacketData(data)
-				if err != nil {
-					wan.stat.txRrr += 1
-					log.Println("wan-send: fail to send data, ", err)
-				} else {
-					wan.stat.txall += 1
-				}
-			}
-		}
+	mac, rst := getArpWithSearch(string(data[30:34]), nic.netName)
+	if rst {
+		copy(data[MACDSTSTART:MACDSTEND], mac)
 	}
+	//replace src mac
+	copy(data[MACSRCSTART:MACSRCEND], nic.mac)
+	//replace source ip
+	copy(data[IPSRCSTART:IPSRCEND], nic.ip)
+
+	//calculate ip checksum
+	copy(data[24:26], []byte{0, 0}) //set ip checksum
+	checksum := ipchecksum(data[14:34])
+	copy(data[24:26], []byte{byte(checksum >> 8), byte(checksum & 0xff)}) //set ip checksum
+
+	//update tcp checksum
+	if bytes.Equal(data[23:24], []byte{0x06}) == true { //tcp
+
+		checksum = tcpchecksum(data[34:], data[26:30], data[30:34])
+		copy(data[50:52], []byte{byte(checksum >> 8), byte(checksum & 0xff)}) //set tcp checksum
+	} else if bytes.Equal(data[23:24], []byte{0x11}) == true { //udp
+
+	}
+	err := nic.handle.WritePacketData(data)
+	if err == nil {
+		log.Println("forward to wan success")
+		return true
+	} else {
+		log.Println("forward to wan fail")
+	}
+	return false
 }
 
 func ipchecksum(data []byte) uint16 {
@@ -216,7 +219,6 @@ func ipchecksum(data []byte) uint16 {
 	// 取反得到校验和
 	return uint16(^sum)
 }
-
 func caltcpchecksum(data []byte) uint16 {
 	var sum uint32
 	length := len(data)
