@@ -1,70 +1,80 @@
 package main
 
 import (
-	"github.com/google/gopacket"
-	"github.com/google/gopacket/pcap"
 	"log"
 	"net"
-	"strconv"
 	"strings"
 	"time"
+
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/pcap"
 )
 
 const (
-	NICUNKNOWN = iota
-	NICLAN
+	NICLAN = iota
 	NICWAN
 )
 
 type NIC struct {
 	valid    bool
-	ip       net.IP //每个网卡暂时只支持一个IPv4，后续考虑支持多个IPv4
-	mac      net.HardwareAddr
+	ip       net.IP           //每个网卡暂时只支持一个IPv4，后续考虑支持多个IPv4
+	mac      net.HardwareAddr //网口mac
+	gwip     net.IP           //默认网关ip
+	gwmac    net.HardwareAddr //默认网关mac
 	netName  string
 	pcapName string
-	que      chan gopacket.Packet
+	nicType  int //wan or lan
 	handle   *pcap.Handle
-	//stat     statNic
+	que      chan gopacket.Packet
 }
 
-type LAN struct {
-	nic    NIC
-	subnet *subNet //检测子网
-}
+var nics []NIC = []NIC{} //网口队列
 
-type WAN struct {
-	nic      NIC
-	portpool *PortPool        //维护SNAT端口池
-	mac      net.HardwareAddr //上行mac地址
-}
-
-type NICPOOL struct { //暂时仅支持一个wan口，一个lan口
-	lan LAN
-	wan WAN
-}
-
-var nicpool NICPOOL = NICPOOL{}
-
-func parseNicConf(conftype int32, value string) bool {
-	switch conftype {
+func addNic(nicType int, name string) bool {
+	var nic NIC
+	switch nicType {
 	case CONFWANNAME:
-		nicpool.wan.nic.initNic(value)
-	case CONFWANMAC:
-		nicpool.wan.mac, _ = net.ParseMAC(value)
-	case CONFWANPORT:
-		parts := strings.Split(value, "-")
-		if len(parts) != 2 {
-			return false
-		}
-		start, _ := strconv.Atoi(parts[0])
-		end, _ := strconv.Atoi(parts[1])
-		nicpool.wan.portpool = initPortPool(uint16(start), uint16(end))
+		nic.nicType = NICWAN
 	case CONFLANNAME:
-		nicpool.lan.nic.initNic(value)
-	case CONFLANIP:
-		nicpool.lan.subnet, _ = initSubnet(value)
+		nic.nicType = NICLAN
 	default:
+		log.Println("  unknown param")
+		return false
 	}
+
+	if !nic.initNic(name) {
+		return false
+	}
+	if !nic.getNicPcapName() {
+		return false
+	}
+
+	if !nic.openHandle() {
+		return false
+	}
+
+	nic.que = make(chan gopacket.Packet, 10000)
+	nics = append(nics, nic)
+	return true
+}
+
+func getNicByType(nicType int) *NIC {
+	for _, value := range nics {
+		if value.nicType == nicType {
+			return &value
+		}
+	}
+	return nil
+}
+
+func setNicGw(nicType int, value string) bool {
+	nic := getNicByType(nicType)
+	if nic == nil {
+		log.Println("  fail to get nic")
+		return false
+	}
+
+	nic.gwip = net.ParseIP(value).To4()
 	return true
 }
 
@@ -79,14 +89,15 @@ func (nic *NIC) initNic(name string) bool {
 			address, err := f.Addrs()
 			if err == nil {
 				for _, value := range address {
-					index := strings.Index(value.String(), ":") //check ipv6
-					if index != -1 {                            //skip ipv6
+					index := strings.Index(value.String(), ":") //skip ipv6
+					if index != -1 {
 						continue
 					}
 
 					index = strings.Index(value.String(), "/")
 					if index != -1 {
 						nic.ip = net.ParseIP(value.String()[0:index]).To4()
+						nic.mac = f.HardwareAddr
 						nic.valid = true
 					}
 					return true
@@ -97,48 +108,46 @@ func (nic *NIC) initNic(name string) bool {
 			}
 		}
 	}
+	log.Println("  fail to get nic, ", nname)
 	return false
 }
 
-func getNicPcapName() bool {
+func (nic *NIC) getNicPcapName() bool {
 	devices, err := pcap.FindAllDevs()
 	if err != nil {
 		log.Println(err)
 		return false
 	}
 
-	// Find exact device
-	// 根据网卡名称从所有网卡中取到精确的网卡
-	//var device pcap.Interface
+	//根据IP匹配获取网卡对应的pcap名
 	for _, d := range devices {
 		for _, value := range d.Addresses {
-			if value.IP.String() == nicpool.lan.nic.ip.String() {
-				nicpool.lan.nic.pcapName = d.Name
-			} else if value.IP.String() == nicpool.wan.nic.ip.String() {
-				nicpool.wan.nic.pcapName = d.Name
+			if value.IP.String() == nic.ip.String() {
+				nic.pcapName = d.Name
+				return true
 			}
 		}
 	}
-	return true
+	return false
 }
 
-func (nic *NIC) initNicHandle() bool {
+func (nic *NIC) openHandle() bool {
 	inactive, err := pcap.NewInactiveHandle(nic.pcapName)
 	if err != nil {
-		log.Println("lan-recv: fail to open nic, ", err)
+		log.Println("openHandle: fail to open nic, ", err)
 		return false
 	}
 	defer inactive.CleanUp()
 
 	err = inactive.SetImmediateMode(true)
 	if err != nil {
-		log.Println("lan-recv: fail to set mode, ", err)
+		log.Println("openHandle: fail to set mode, ", err)
 		return false
 	}
 
 	if err = inactive.SetTimeout(time.Second); err != nil {
 		if err != nil {
-			log.Println("lan-recv: fail to set timeout, ", err)
+			log.Println("openHandle: fail to set timeout, ", err)
 			return false
 		}
 	}
@@ -149,51 +158,36 @@ func (nic *NIC) initNicHandle() bool {
 	// Finally, create the actual handle by calling Activate:
 	handle, err := inactive.Activate() // after this, inactive is no longer valid
 	if err != nil {
-		log.Println("lan-recv: fail to active nic, ", err)
+		log.Println("openHandle: fail to active nic, ", err)
 		return false
 	}
 
-	handle.SetDirection(pcap.DirectionIn)
+	//FIXME: 设置方向不生效
+	// if err = handle.SetDirection(pcap.DirectionIn); err != nil {
+	// 	log.Println("openHandle: fail to set direction, ", err)
+	// }
 	nic.handle = handle
 	return true
 }
 
+func dumpNics() {
+	for _, nic := range nics {
+		nic.dumpNic()
+	}
+}
+
 func (nic *NIC) dumpNic() {
 	log.Println("-------------------")
-	log.Println("valid: ", nic.valid)
-	log.Println("ip: ", nic.ip.String())
-	log.Println("mac: ", nic.mac.String())
 	log.Println("netName: ", nic.netName)
 	log.Println("pcapName: ", nic.pcapName)
-}
-
-func initNicPool() bool {
-	getNicPcapName()
-	nicpool.lan.nic.initNicHandle()
-	nicpool.wan.nic.initNicHandle()
-
-	nicpool.wan.nic.que = make(chan gopacket.Packet, 10000)
-	nicpool.lan.nic.que = make(chan gopacket.Packet, 10000)
-
-	return true
-}
-
-func destoryNicPool() {
-	if nicpool.lan.nic.handle != nil {
-		nicpool.lan.nic.handle.Close()
+	log.Println("valid: ", nic.valid)
+	if nic.nicType == NICWAN {
+		log.Println("type: wan")
+	} else {
+		log.Println("type: lan")
 	}
-	if nicpool.wan.nic.handle != nil {
-		nicpool.wan.nic.handle.Close()
-	}
-}
-
-func dumpNicPool() {
-	log.Println("NIC POOL:")
-	log.Println("  LAN:")
-	nicpool.lan.nic.dumpNic()
-	nicpool.lan.subnet.dumpSubnet()
-	log.Println("  WAN:")
-	nicpool.wan.nic.dumpNic()
-	log.Println("  mac:", nicpool.wan.mac.String())
-	nicpool.wan.portpool.dumpPortPool()
+	log.Println("ip: ", nic.ip.String())
+	log.Println("mac: ", nic.mac.String())
+	log.Println("gwip: ", nic.gwip.String())
+	log.Println("gwmac: ", nic.gwmac.String())
 }
