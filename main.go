@@ -1,24 +1,32 @@
 package main
 
 import (
+	"fmt"
 	"os"
+	"time"
 )
 
 func main() {
 	if parseArg(os.Args) == false {
+		fmt.Println("  parseArg failed\nexit")
 		return
 	}
 
-	initLog()
+	if initLog() == false {
+		fmt.Println("  initLog failed\nexit")
+		return
+	}
 	defer closeLog()
 
-	loadConf()
+	if loadConf() == false {
+		fmt.Println("  loadConf failed\nexit")
+		return
+	}
 
-	initNicPool()
-	defer destoryNicPool()
-	dumpNicPool()
+	dumpNics()
 
 	forward()
 	for {
+		time.Sleep(100 * time.Second)
 	}
 }
