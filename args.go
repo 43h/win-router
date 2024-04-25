@@ -22,10 +22,10 @@ func parseArg(arg []string) bool {
 		} else if arg[1] == "-l" {
 			logFileFlag = false
 		} else {
-			fmt.Println("  unknown param\nexit")
+			fmt.Println("  unknown param\n exit")
 			showHelp()
 		}
-		return true
+		return false
 	} else {
 		fmt.Println("  unknown param")
 		showHelp()
