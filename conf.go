@@ -14,7 +14,6 @@ const (
 	CONFWANNAME = iota
 	CONFWANGW   //WAN口网关
 	CONFLANNAME
-	CONFLANGW //LAN口网关
 )
 
 func loadConf() bool {
@@ -27,7 +26,9 @@ func loadConf() bool {
 
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
-		parseLine(scanner.Text())
+		if parseLine(scanner.Text()) == false {
+			return false
+		}
 	}
 	return true
 }
@@ -41,16 +42,16 @@ func parseLine(line string) bool {
 	key := parts[0]
 	value := parts[1]
 	fmt.Println(key, value)
-	if key == "wan" {
+	if key == "wan-name" {
 		addNic(CONFWANNAME, value)
-	} else if key == "lan" {
+	} else if key == "lan-name" {
 		addNic(CONFLANNAME, value)
-	} else if key == "wangw" {
-		setNicGw(CONFWANGW, value)
-	} else if key == "langw" {
-		setNicGw(CONFLANGW, value)
+	} else if key == "wan-gwip" {
+		if setNicGw(CONFWANGW, value) == false {
+			return false
+		}
 	} else {
-		log.Println("  unknown param")
+		log.Println("  unknown param ", key, value)
 		return false
 	}
 	return true
