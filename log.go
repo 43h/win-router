@@ -42,7 +42,7 @@ func closeLog() {
 
 func delLog() {
 	dir := "./"
-
+	//clean log files
 	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
