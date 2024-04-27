@@ -1,54 +1,30 @@
 package main
 
 import (
-	"net"
+	"bytes"
+	"fmt"
+	"os/exec"
 	"strings"
 )
 
-var ARPTable map[string](net.HardwareAddr) = map[string](net.HardwareAddr){}
+func getMacByIp(ip string) (string, bool) {
+	cmd := exec.Command("arp", "-a")
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	err := cmd.Run()
+	if err != nil {
+		fmt.Println("fail to read arp table, ", err)
+		return "", false
+	}
 
-func parseARP(line string) {
-	lines := strings.Split(line, "\n")
+	lines := strings.Split(out.String(), "\n")
 	for _, line := range lines {
 		fields := strings.Fields(line)
 		if len(fields) == 3 {
-			ip := fields[0]
-			mac := fields[1]
-			_, ok := ARPTable[ip]
-			if !ok {
-				ARPTable[net.IP(ip).To4().String()] = net.HardwareAddr(mac)
+			if fields[0] == ip {
+				return fields[1], true
 			}
 		}
 	}
-}
-
-func addArp(ip string, mac string) {
-	_, ok := ARPTable[ip]
-	if !ok {
-		ARPTable[ip] = net.HardwareAddr(mac)
-	}
-}
-
-func getArp(ip string) (net.HardwareAddr, bool) {
-	v, ok := ARPTable[ip]
-	if ok {
-		return v, true
-	}
-	return nil, false
-}
-
-func getArpWithSearch(ip string, name string) (net.HardwareAddr, bool) {
-	if v, ok := ARPTable[ip]; ok {
-		return v, true
-	} else {
-		go arpRequest(ip)
-	}
-	return nil, false
-}
-
-func arpRequest(ip string) {
-	mac, err := net.ParseMAC("f8:56:c3:12:1a:be")
-	if err == nil {
-		ARPTable[ip] = mac
-	}
+	return "", false
 }
