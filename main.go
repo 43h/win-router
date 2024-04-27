@@ -8,7 +8,6 @@ import (
 
 func main() {
 	if parseArg(os.Args) == false {
-		fmt.Println("  parseArg failed\nexit")
 		return
 	}
 
