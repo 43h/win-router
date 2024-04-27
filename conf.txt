@@ -1,2 +1,3 @@
-wan:"以太网"
-lan:"VMware Network Adapter VMnet1"
+wan-name:"以太网"
+wan-gwip:"192.168.1.1"
+lan-name:"VMware Network Adapter VMnet1"
