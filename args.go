@@ -2,8 +2,9 @@ package main
 
 import (
 	"fmt"
-	"github.com/google/gopacket/pcap"
 	"net"
+
+	"github.com/google/gopacket/pcap"
 )
 
 func parseArg(arg []string) bool {
@@ -11,7 +12,7 @@ func parseArg(arg []string) bool {
 	if argNum == 1 {
 		return true
 	} else if argNum == 2 {
-		if arg[1] == "-h" || arg[1] == "--help" {
+		if arg[1] == "-h" || arg[1] == "--help" || arg[1] == "help" {
 			showHelp()
 		} else if arg[1] == "-n" {
 			showNicByNet()
