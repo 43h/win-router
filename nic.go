@@ -17,26 +17,27 @@ const (
 
 type NIC struct {
 	valid    bool
+	netName  string
+	pcapName string
+	nicType  int              //wan or lan
 	ip       net.IP           //每个网卡暂时只支持一个IPv4，后续考虑支持多个IPv4
 	mac      net.HardwareAddr //网口mac
 	gwip     net.IP           //默认网关ip
 	gwmac    net.HardwareAddr //默认网关mac
-	netName  string
-	pcapName string
-	nicType  int //wan or lan
-	handle   *pcap.Handle
+	handle   *pcap.Handle     //pcap handle
 	que      chan gopacket.Packet
 }
 
-var nics []NIC = []NIC{} //网口队列
+var lanNic NIC = NIC{valid: true, nicType: NICLAN}
+var wanNic NIC = NIC{valid: true, nicType: NICWAN}
 
 func addNic(nicType int, name string) bool {
-	var nic NIC
+	var nic *NIC = nil
 	switch nicType {
 	case CONFWANNAME:
-		nic.nicType = NICWAN
+		nic = &wanNic
 	case CONFLANNAME:
-		nic.nicType = NICLAN
+		nic = &lanNic
 	default:
 		log.Println("  unknown param")
 		return false
@@ -54,27 +55,21 @@ func addNic(nicType int, name string) bool {
 	}
 
 	nic.que = make(chan gopacket.Packet, 10000)
-	nics = append(nics, nic)
 	return true
 }
 
-func getNicByType(nicType int) *NIC {
-	for _, value := range nics {
-		if value.nicType == nicType {
-			return &value
-		}
-	}
-	return nil
-}
-
 func setNicGw(nicType int, value string) bool {
-	nic := getNicByType(nicType)
-	if nic == nil {
-		log.Println("  fail to get nic")
+	if value[0] == '"' {
+		value = value[1 : len(value)-1] //去掉前后引号
+	}
+	wanNic.gwip = net.ParseIP(value).To4()
+	mac, rst := getMacByIp(value)
+	if rst == true {
+		wanNic.gwmac, _ = net.ParseMAC(mac)
+	} else {
+		log.Println("  fail to get mac of gateway, please 'ping' " + value + " first")
 		return false
 	}
-
-	nic.gwip = net.ParseIP(value).To4()
 	return true
 }
 
@@ -171,9 +166,8 @@ func (nic *NIC) openHandle() bool {
 }
 
 func dumpNics() {
-	for _, nic := range nics {
-		nic.dumpNic()
-	}
+	lanNic.dumpNic()
+	wanNic.dumpNic()
 }
 
 func (nic *NIC) dumpNic() {
