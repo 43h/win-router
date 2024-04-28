@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
+	"log"
 	"net"
 	"time"
 
@@ -22,6 +23,8 @@ const (
 	MACSRCEND   = 12
 	ETHTYPESTART
 	ETHTYPEEND   = 14
+	IPPROTOSTAR  = 23
+	IPPROTOEND   = 24
 	IPSRCSTART   = 26
 	IPSRCEND     = 30
 	IPDSTSTART   = 30
@@ -71,7 +74,10 @@ func forward() {
 		//start to handle pkt
 		if fromlan == true { //from lan, to wan
 			key := threetuple{([4]byte)(data[IPDSTSTART:IPDSTEND]), ([2]byte)(data[PORTSRCSTART:PORTSRCEND]), ([2]byte)(data[PORTDSTSTART:PORTDSTEND])}
-
+			if bytes.Equal(data[IPPROTOSTAR:IPPROTOEND], []byte{0x01}) == true {
+				key.port = [2]byte{0, 0}
+				key.port2 = [2]byte{0, 0}
+			}
 			fwdinfo, exist := forwordtable[key]
 			if exist { //记录存在
 				sip := fwdinfo.ip[:]
@@ -89,6 +95,10 @@ func forward() {
 			}
 		} else { //from wan, to lan
 			key := threetuple{([4]byte)(data[IPSRCSTART:IPSRCEND]), ([2]byte)(data[PORTDSTSTART:PORTDSTEND]), ([2]byte)(data[PORTSRCSTART:PORTSRCEND])}
+			if bytes.Equal(data[IPPROTOSTAR:IPPROTOEND], []byte{0x01}) == true {
+				key.port = [2]byte{0, 0}
+				key.port2 = [2]byte{0, 0}
+			}
 			fwdinfo, exists := forwordtable[key]
 			if exists {
 				handleDownstreamPkt(pkt, fwdinfo)
@@ -119,11 +129,14 @@ func rcvPkt(nic *NIC) {
 			}
 		}
 
-		if bytes.Equal(packet.Data()[23:24], []byte{0x11}) == true { // skip udp do it later
-			continue
-		}
-
-		nic.que <- packet
+		if bytes.Equal(packet.Data()[IPPROTOSTAR:IPPROTOEND], []byte{0x06}) == true { //tcp
+			nic.que <- packet
+		} else if bytes.Equal(packet.Data()[IPPROTOSTAR:IPPROTOEND], []byte{0x01}) == true { //icmp
+			if nic.nicType == NICWAN {
+				log.Println("it is icmp from wan")
+			}
+			nic.que <- packet
+		} //udp to do
 	}
 }
 
@@ -145,7 +158,6 @@ func handleUpstreamPkt(pkt gopacket.Packet) bool {
 
 	//update tcp checksum
 	if bytes.Equal(data[23:24], []byte{0x06}) == true { //tcp
-
 		checksum = tcpchecksum(data[34:], data[26:30], data[30:34])
 		copy(data[50:52], []byte{byte(checksum >> 8), byte(checksum & 0xff)}) //set tcp checksum
 	} else if bytes.Equal(data[23:24], []byte{0x11}) == true { //udp
