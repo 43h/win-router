@@ -2,9 +2,8 @@ package main
 
 import (
 	"fmt"
-	"net"
-
 	"github.com/google/gopacket/pcap"
+	"net"
 )
 
 func parseArg(arg []string) bool {
