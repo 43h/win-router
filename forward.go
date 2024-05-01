@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
-	"log"
 	"net"
 	"time"
 
@@ -132,9 +131,6 @@ func rcvPkt(nic *NIC) {
 		if bytes.Equal(packet.Data()[IPPROTOSTAR:IPPROTOEND], []byte{0x06}) == true { //tcp
 			nic.que <- packet
 		} else if bytes.Equal(packet.Data()[IPPROTOSTAR:IPPROTOEND], []byte{0x01}) == true { //icmp
-			if nic.nicType == NICWAN {
-				log.Println("it is icmp from wan")
-			}
 			nic.que <- packet
 		} //udp to do
 	}
