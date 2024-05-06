@@ -49,14 +49,12 @@ type forwardinfo struct {
 var forwordtable map[threetuple]forwardinfo = map[threetuple]forwardinfo{}
 
 func forward() {
-	ticker := time.NewTicker(time.Second * 10)
-	defer ticker.Stop()
-
 	lan := &lanNic
 	wan := &wanNic
 
 	go rcvPkt(lan)
 	go rcvPkt(wan)
+	go handleTimeout()
 
 	var pkt gopacket.Packet
 	var fromlan bool
@@ -66,8 +64,6 @@ func forward() {
 			fromlan = true
 		case pkt = <-wan.que:
 			fromlan = false
-		case <-ticker.C:
-			handleTimeout()
 		}
 		data := pkt.Data()
 		//start to handle pkt
@@ -276,9 +272,12 @@ func getdatalen(packet gopacket.Packet) uint16 {
 }
 
 func handleTimeout() {
-	for k, v := range forwordtable {
-		if time.Now().Unix()-v.timestamp > 10 { //超过10秒无报文，则删除转发信息
-			delete(forwordtable, k)
+	for {
+		for k, v := range forwordtable {
+			if time.Now().Unix()-v.timestamp > 10 { //超过10秒无报文，则删除转发信息
+				delete(forwordtable, k)
+			}
 		}
+		time.Sleep(300 * time.Millisecond)
 	}
 }
