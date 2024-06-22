@@ -21,6 +21,9 @@ func parseArg(arg []string) bool {
 			dumpConf()
 		} else if arg[1] == "-l" {
 			logFileFlag = false
+		} else if arg[1] == "-v" {
+			showVersion()
+			return false
 		} else {
 			fmt.Println("  unknown param\n exit")
 			showHelp()
@@ -34,10 +37,11 @@ func parseArg(arg []string) bool {
 }
 
 func showHelp() {
-	fmt.Println("-h: help")
-	fmt.Println("-n: show NIC by net")
-	fmt.Println("-p: show NIC by pcap")
-	fmt.Println("-d: dump conf")
+	fmt.Println(" -v: show version")
+	fmt.Println(" -h: help")
+	fmt.Println(" -n: show NIC by net")
+	fmt.Println(" -p: show NIC by pcap")
+	fmt.Println(" -d: dump conf")
 }
 
 func showNicByPcap() {
