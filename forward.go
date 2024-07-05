@@ -68,8 +68,9 @@ func forward() {
 		data := pkt.Data()
 		//start to handle pkt
 		if fromlan == true { //from lan, to wan
+			//<dip,dport,dport>
 			key := threetuple{([4]byte)(data[IPDSTSTART:IPDSTEND]), ([2]byte)(data[PORTSRCSTART:PORTSRCEND]), ([2]byte)(data[PORTDSTSTART:PORTDSTEND])}
-			if bytes.Equal(data[IPPROTOSTAR:IPPROTOEND], []byte{0x01}) == true {
+			if bytes.Equal(data[IPPROTOSTAR:IPPROTOEND], []byte{0x01}) == true { //icmp, 端口为0
 				key.port = [2]byte{0, 0}
 				key.port2 = [2]byte{0, 0}
 			}
@@ -89,13 +90,15 @@ func forward() {
 				handleUpstreamPkt(pkt)
 			}
 		} else { //from wan, to lan
+			//<ipsrc, dport, sport>
 			key := threetuple{([4]byte)(data[IPSRCSTART:IPSRCEND]), ([2]byte)(data[PORTDSTSTART:PORTDSTEND]), ([2]byte)(data[PORTSRCSTART:PORTSRCEND])}
-			if bytes.Equal(data[IPPROTOSTAR:IPPROTOEND], []byte{0x01}) == true {
+			if bytes.Equal(data[IPPROTOSTAR:IPPROTOEND], []byte{0x01}) == true { //icmp
 				key.port = [2]byte{0, 0}
 				key.port2 = [2]byte{0, 0}
 			}
 			fwdinfo, exists := forwordtable[key]
 			if exists {
+				fwdinfo.timestamp = time.Now().Unix()
 				handleDownstreamPkt(pkt, fwdinfo)
 			}
 		}
@@ -274,10 +277,10 @@ func getdatalen(packet gopacket.Packet) uint16 {
 func handleTimeout() {
 	for {
 		for k, v := range forwordtable {
-			if time.Now().Unix()-v.timestamp > 10 { //超过10秒无报文，则删除转发信息
+			if time.Now().Unix()-v.timestamp > 600 { //超时删除转发信息
 				delete(forwordtable, k)
 			}
 		}
-		time.Sleep(300 * time.Millisecond)
+		time.Sleep(3 * time.Second)
 	}
 }
