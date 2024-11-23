@@ -1,4 +1,4 @@
-module router
+module win-router
 
 go 1.21.0
 
